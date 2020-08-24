@@ -15,6 +15,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -39,7 +40,7 @@ public class SendPaymentWorker implements CommandLineRunner {
     @Override
     public void run(String... args) throws Exception {
         externalTaskClient
-                .subscribe("confirmation-sending")
+                .subscribe("payment-starting")
                 .handler(this::sendPayment).open();
     }
 
@@ -59,11 +60,30 @@ public class SendPaymentWorker implements CommandLineRunner {
         messageRequestDto.setBusinessKey(UUID.randomUUID().toString());
         messageRequestDto.setProcessVariables(variables);
         messageRequestDto.setMessageName("PaymentRequestedMessage");
+
         ResponseEntity<String> response = restTemplate.postForEntity(CAMUNDA_REST_API_URL + CAMUNDA_MESSAGE_API, messageRequestDto, String.class);
 
         if(response.getStatusCode().equals(HttpStatus.NO_CONTENT) || response.getStatusCode().equals(HttpStatus.OK)){
             externalTaskService.complete(externalTask);
         }
+        else{
+            Integer retries = getRetries(externalTask);
 
+            externalTaskService.handleFailure(externalTask,
+                    response.getStatusCode().toString(), response.getBody(), retries, 10000);
+        }
+
+    }
+
+    private Integer getRetries(ExternalTask externalTask) {
+        Integer retries = externalTask.getRetries();
+
+        if(retries == null){
+            retries = 3;
+        }
+        else{
+            retries -= 1;
+        }
+        return retries;
     }
 }
